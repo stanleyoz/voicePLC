@@ -2,37 +2,30 @@
 
 from typing import Dict, Any, Optional, List
 from device import Device
+from llm_handler import LLMHandler
 import json
 import time
-import re
 from pathlib import Path
-from llm_handler import LLMHandler
-
-
-# device_controller.py (updated init and process_command)
 
 class DeviceController:
-    def __init__(self, model_path: str, llm_response: bool = True, config_path: Optional[str] = None):
-        """Initialize the device controller with LLM support
-        
-        Args:
-            model_path: Path to the LLM model file
-            llm_response: If True, generate natural language responses
-            config_path: Optional path to config file
-        """
+    """Controls multiple devices and handles command processing using LLM"""
+    
+    def __init__(self, model_path: str, config_path: Optional[str] = None):
         self.devices: Dict[str, Device] = {}
         self._command_history: List[Dict[str, Any]] = []
-        self.llm_response = llm_response
         self.llm_handler = LLMHandler(model_path)
-        if config_path:
-            self._load_config(config_path)
+        self._load_config(config_path) if config_path else None
 
     def process_command(self, command: str) -> Dict[str, Any]:
         """Process a natural language command using LLM"""
         try:
+            # Generate context for LLM
             context = self.llm_handler.generate_device_context(self.devices)
+            
+            # Parse command using LLM
             action = self.llm_handler.parse_command(command, context)
             
+            # Check for parsing errors
             if "error" in action:
                 return {
                     "success": False,
@@ -40,30 +33,29 @@ class DeviceController:
                     "error": self.llm_handler.enhance_error_message(action["error"])
                 }
             
+            # Execute the parsed action
             result = self._execute_action(action)
+            
+            # Generate natural language response
+            nl_response = self.llm_handler.generate_response(result)
             
             response = {
                 "success": True,
                 "command": command,
                 "result": result,
+                "response": nl_response
             }
-
-            if self.llm_response:
-                # Generate natural language response if flag is True
-                nl_response = self.llm_handler.generate_response({"result": result})
-                response["response"] = nl_response
-            else:
-                # Return raw result if flag is False
-                response["response"] = result
             
+            # Log command
             self._log_command(command, response)
+            
             return response
             
         except Exception as e:
             error_result = {
                 "success": False,
                 "command": command,
-                "error": str(e)
+                "error": self.llm_handler.enhance_error_message(str(e))
             }
             self._log_command(command, error_result)
             return error_result
@@ -147,35 +139,4 @@ class DeviceController:
             ]
         }
 
-    def _log_command(self, command: str, result: Dict[str, Any]) -> None:
-        """Log processed commands"""
-        self._command_history.append({
-            "timestamp": time.time(),
-            "command": command,
-            "result": result
-        })
-
-    def get_command_history(self, limit: Optional[int] = None) -> List[Dict[str, Any]]:
-        """Get command history"""
-        if limit:
-            return self._command_history[-limit:]
-        return self._command_history
-
-    def _load_config(self, config_path: str) -> None:
-        """Load device configuration from file"""
-        config_path = Path(config_path)
-        if config_path.exists():
-            with open(config_path) as f:
-                config = json.load(f)
-    
-    def add_device(self, device: Device) -> None:
-        """Add a device to the controller"""
-        self.devices[device.name] = device
-
-    def get_device(self, name: str) -> Optional[Device]:
-        """Get a device by name (case-insensitive)"""
-        name_lower = name.lower()
-        for device_name, device in self.devices.items():
-            if device_name.lower() == name_lower:
-                return device
-        return None
+    # ... (rest of the methods remain the same) ...
