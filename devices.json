@@ -1,0 +1,107 @@
+{
+    "facility": "Main Pump Station 01",
+    "sensors": {
+        "flow_sensor_1": {
+            "id": "flow_sensor_1",
+            "type": "flow",
+            "unit": "m3/h",
+            "range": [0, 500],
+            "description": "Main inlet flow meter",
+            "mock_range": [250, 350]
+        },
+        "flow_sensor_2": {
+            "id": "flow_sensor_2",
+            "type": "flow",
+            "unit": "m3/h",
+            "range": [0, 500],
+            "description": "Main outlet flow meter",
+            "mock_range": [240, 340]
+        },
+        "pressure_in": {
+            "id": "pressure_in",
+            "type": "pressure",
+            "unit": "bar",
+            "range": [0, 10],
+            "description": "Inlet pressure sensor",
+            "mock_range": [2.0, 3.0]
+        },
+        "pressure_out": {
+            "id": "pressure_out",
+            "type": "pressure",
+            "unit": "bar",
+            "range": [0, 16],
+            "description": "Outlet pressure sensor",
+            "mock_range": [5.0, 6.0]
+        },
+        "temp_pump1": {
+            "id": "temp_pump1",
+            "type": "temperature",
+            "unit": "°C",
+            "range": [0, 100],
+            "description": "Pump 1 bearing temperature",
+            "mock_range": [35, 45]
+        },
+        "temp_pump2": {
+            "id": "temp_pump2",
+            "type": "temperature",
+            "unit": "°C",
+            "range": [0, 100],
+            "description": "Pump 2 bearing temperature",
+            "mock_range": [35, 45]
+        },
+        "power_meter": {
+            "id": "power_meter",
+            "type": "power",
+            "unit": "kW",
+            "range": [0, 200],
+            "description": "Station power consumption",
+            "mock_range": [75, 120]
+        },
+        "energy_meter": {
+            "id": "energy_meter",
+            "type": "energy",
+            "unit": "kWh",
+            "range": [0, 1000000],
+            "description": "Cumulative energy consumption",
+            "mock_range": [500000, 500100]
+        },
+        "level_sensor": {
+            "id": "level_sensor",
+            "type": "level",
+            "unit": "m",
+            "range": [0, 5],
+            "description": "Wet well level",
+            "mock_range": [2.0, 3.5]
+        }
+    },
+    "actuators": {
+        "pump1": {
+            "id": "pump1",
+            "type": "pump",
+            "states": ["OFF", "ON", "FAULT"],
+            "description": "Main pump 1 - 75kW",
+            "initial_state": "ON"
+        },
+        "pump2": {
+            "id": "pump2",
+            "type": "pump",
+            "states": ["OFF", "ON", "FAULT"],
+            "description": "Main pump 2 - 75kW",
+            "initial_state": "OFF"
+        },
+        "inlet_valve": {
+            "id": "inlet_valve",
+            "type": "valve",
+            "states": ["CLOSED", "OPEN", "PARTIAL"],
+            "description": "Main inlet isolation valve",
+            "initial_state": "OPEN"
+        },
+        "outlet_valve": {
+            "id": "outlet_valve",
+            "type": "valve",
+            "states": ["CLOSED", "OPEN", "PARTIAL"],
+            "description": "Main outlet isolation valve",
+            "initial_state": "OPEN"
+        }
+    }
+}

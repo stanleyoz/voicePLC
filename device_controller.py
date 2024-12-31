@@ -1,181 +1,111 @@
 # device_controller.py
-
-from typing import Dict, Any, Optional, List
-from device import Device
-import json
-import time
-import re
-from pathlib import Path
+from typing import Dict, Any, Optional, Union
+from device_components import DeviceManager, Sensor, Actuator
 from llm_handler import LLMHandler
-
-
-# device_controller.py (updated init and process_command)
+import json
+import logging
 
 class DeviceController:
-    def __init__(self, model_path: str, llm_response: bool = True, config_path: Optional[str] = None):
-        """Initialize the device controller with LLM support
-        
-        Args:
-            model_path: Path to the LLM model file
-            llm_response: If True, generate natural language responses
-            config_path: Optional path to config file
-        """
-        self.devices: Dict[str, Device] = {}
-        self._command_history: List[Dict[str, Any]] = []
-        self.llm_response = llm_response
-        self.llm_handler = LLMHandler(model_path)
-        if config_path:
-            self._load_config(config_path)
-
-    def process_command(self, command: str) -> Dict[str, Any]:
-        """Process a natural language command using LLM"""
-        try:
-            context = self.llm_handler.generate_device_context(self.devices)
-            action = self.llm_handler.parse_command(command, context)
-            
-            if "error" in action:
-                return {
-                    "success": False,
-                    "command": command,
-                    "error": self.llm_handler.enhance_error_message(action["error"])
-                }
-            
-            result = self._execute_action(action)
-            
-            response = {
-                "success": True,
-                "command": command,
-                "result": result,
-            }
-
-            if self.llm_response:
-                # Generate natural language response if flag is True
-                nl_response = self.llm_handler.generate_response({"result": result})
-                response["response"] = nl_response
-            else:
-                # Return raw result if flag is False
-                response["response"] = result
-            
-            self._log_command(command, response)
-            return response
-            
-        except Exception as e:
-            error_result = {
-                "success": False,
-                "command": command,
-                "error": str(e)
-            }
-            self._log_command(command, error_result)
-            return error_result
-
-    def _execute_action(self, action: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute a parsed action"""
-        action_type = action.get("type")
-        
-        if action_type == "actuator_control":
-            return self._handle_actuator_action(action)
-        elif action_type == "sensor_read":
-            return self._handle_sensor_action(action)
-        elif action_type == "status_check":
-            return self._handle_status_action(action)
-        elif action_type == "list_devices":
-            return self._handle_list_action()
-        else:
-            raise ValueError(f"Unknown action type: {action_type}")
-
-    def _handle_actuator_action(self, action: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle actuator control action"""
-        device = self.get_device(action["device"])
-        if not device:
-            raise ValueError(f"Device not found: {action['device']}")
-        
-        success = device.control_actuator(
-            action["actuator"], 
-            action["action"].lower() == "on"
+    def __init__(
+        self,
+        model_path: str,
+        config_file: str = "devices.json",
+        mock: bool = False,
+        n_threads: Optional[int] = None,
+        use_gpu: bool = False,
+        gpu_layers: Optional[int] = None
+    ):
+        """Initialize the device controller"""
+        # Initialize LLM handler
+        self.llm = LLMHandler(
+            model_path=model_path,
+            n_threads=n_threads,
+            use_gpu=use_gpu,
+            gpu_layers=gpu_layers
         )
         
-        return {
-            "type": "actuator_control",
-            "device": device.name,
-            "actuator": action["actuator"],
-            "state": action["action"],
-            "success": success
-        }
-
-    def _handle_sensor_action(self, action: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle sensor reading action"""
-        device = self.get_device(action["device"])
-        if not device:
-            raise ValueError(f"Device not found: {action['device']}")
+        # Initialize device manager
+        self.device_manager = DeviceManager(config_file, mock=mock)
         
-        value = device.read_sensor(action["sensor"])
-        sensor = device.get_sensor(action["sensor"])
-        
-        return {
-            "type": "sensor_read",
-            "device": device.name,
-            "sensor": action["sensor"],
-            "value": value,
-            "unit": sensor.unit if sensor else None
+        # Setup logging
+        logging.basicConfig(level=logging.INFO)
+        self.logger = logging.getLogger(__name__)
+
+    def process_command(
+        self,
+        command: str,
+        response_format: str = "text"
+    ) -> Union[str, Dict[str, Any]]:
+        """Process a command using LLM and execute device operations"""
+        try:
+            # Get LLM interpretation
+            llm_response = self.llm.generate_response(
+                command,
+                response_format="json"
+            )
+            
+            if "error" in llm_response:
+                return f"Error: {llm_response['error']}"
+
+            # Get device action
+            device_id = self._map_device_name(llm_response.get("device", ""))
+            if not device_id:
+                return "Could not identify the device in your command"
+
+            # Execute action
+            action = llm_response.get("command", "").lower()
+            value = llm_response.get("value")
+            
+            device = self.device_manager.get_device(device_id)
+            if not device:
+                return f"Device {device_id} not found"
+
+            # Handle the action
+            if action == "read":
+                result = device.read()
+                return self._format_read_response(device, result)
+            elif action == "set":
+                if not hasattr(device, 'set_value'):
+                    return f"Cannot control {device_id} - read-only device"
+                result = device.set_value(value)
+                return f"Set {device.description} to {result.get('state', value)}"
+            else:
+                return f"Unknown command: {action}"
+
+        except Exception as e:
+            self.logger.error(f"Error: {str(e)}")
+            return f"Error processing command: {str(e)}"
+
+    def _map_device_name(self, device_name: str) -> str:
+        """Map common device names to actual device IDs"""
+        # Direct mapping if exact match
+        if device_name in self.device_manager.devices:
+            return device_name
+
+        # Handle common variations
+        name_lower = device_name.lower()
+        mapping = {
+            "pump1": ["pump 1", "pump one", "first pump"],
+            "pump2": ["pump 2", "pump two", "second pump"],
+            "temp_pump1": ["pump 1 temperature", "first pump temperature"],
+            "temp_pump2": ["pump 2 temperature", "second pump temperature"],
+            "pressure_in": ["inlet pressure", "input pressure"],
+            "pressure_out": ["outlet pressure", "output pressure"],
+            "power_meter": ["power", "power consumption"],
+            "energy_meter": ["energy", "energy consumption"],
+            "level_sensor": ["level", "water level", "well level"]
         }
 
-    def _handle_status_action(self, action: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle status check action"""
-        device = self.get_device(action["device"])
-        if not device:
-            raise ValueError(f"Device not found: {action['device']}")
-        
-        return {
-            "type": "status_check",
-            "device": device.name,
-            "state": device.get_state()
-        }
+        for device_id, variants in mapping.items():
+            if any(variant in name_lower for variant in variants):
+                return device_id
 
-    def _handle_list_action(self) -> Dict[str, Any]:
-        """Handle list devices action"""
-        return {
-            "type": "list_devices",
-            "devices": [
-                {
-                    "name": device.name,
-                    "site": device.site,
-                    "actuators": list(device.actuators.keys()),
-                    "sensors": list(device.sensors.keys()),
-                    "metadata": device._metadata
-                }
-                for device in self.devices.values()
-            ]
-        }
+        return ""
 
-    def _log_command(self, command: str, result: Dict[str, Any]) -> None:
-        """Log processed commands"""
-        self._command_history.append({
-            "timestamp": time.time(),
-            "command": command,
-            "result": result
-        })
-
-    def get_command_history(self, limit: Optional[int] = None) -> List[Dict[str, Any]]:
-        """Get command history"""
-        if limit:
-            return self._command_history[-limit:]
-        return self._command_history
-
-    def _load_config(self, config_path: str) -> None:
-        """Load device configuration from file"""
-        config_path = Path(config_path)
-        if config_path.exists():
-            with open(config_path) as f:
-                config = json.load(f)
-    
-    def add_device(self, device: Device) -> None:
-        """Add a device to the controller"""
-        self.devices[device.name] = device
-
-    def get_device(self, name: str) -> Optional[Device]:
-        """Get a device by name (case-insensitive)"""
-        name_lower = name.lower()
-        for device_name, device in self.devices.items():
-            if device_name.lower() == name_lower:
-                return device
-        return None
+    def _format_read_response(self, device: Union[Sensor, Actuator], result: Dict[str, Any]) -> str:
+        """Format the read response based on device type"""
+        if "value" in result and "unit" in result:
+            return f"{device.description}: {result['value']} {result['unit']}"
+        elif "state" in result:
+            return f"{device.description} is {result['state']}"
+        return f"Current value of {device.description}: {result}"

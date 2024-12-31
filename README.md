@@ -1,46 +1,44 @@
-# voicePLC
+# VoicePLC
 
-Voice-controlled PLC system using Python and LLMs. This system allows control of devices, actuators, and sensors through natural language commands.
+A voice-controlled Programmable Logic Controller (PLC) interface using LLM (Large Language Model) for natural language command processing.
 
-## Current Version Status
-Current implementation uses regex-based command processing, with planned upgrade to LLM-based natural language processing.
+## Features
 
-## System Features
-- Device management with actuators and sensors
-- Command-line interface for testing
-- Voice command capability (in development)
-- Support for multiple devices and device types
-- Real-time sensor monitoring
-- Extensible architecture for new device types
+- Voice command recognition using Vosk
+- LLM-powered command interpretation using Mistral 7B
+- Text-to-speech response using espeak
+- GPU/CPU flexible operation
+- Mock device simulation for testing
+- Configurable device setup via JSON
+
+## System Requirements
+
+- Ubuntu 22.04 (WSL2 supported)
+- Python 3.10+
+- CUDA support (optional for GPU acceleration)
 
 ## Installation
 
-### System Requirements
-- Ubuntu 22.04 (tested on WSL)
-- Python 3.10
-- Conda package manager
-
-### Dependencies Installation
-
-1. System Dependencies:
+1. Install system dependencies:
 ```bash
-# Update system
+# System Dependencies (Ubuntu 22.04 WSL)
 sudo apt update && sudo apt upgrade -y
-
-# Install required system packages
 sudo apt install -y build-essential cmake git python3-pip python3-dev
 sudo apt install -y libportaudio2 libsndfile1
 sudo apt install -y portaudio19-dev python3-pyaudio
 sudo apt install -y ffmpeg
+sudo apt install -y espeak
 ```
 
-2. Conda Environment Setup:
+2. Create and activate conda environment:
 ```bash
-# Create and activate conda environment
-conda create -n device_control python=3.10
-conda activate device_control
+conda create -n voicePLC python=3.10
+conda activate voicePLC
+```
 
-# Install conda packages
+3. Install required conda packages:
+```bash
+# Conda Packages
 conda install -c conda-forge numpy
 conda install -c pytorch pytorch cpuonly
 conda install -c conda-forge rich
@@ -50,98 +48,124 @@ conda install -c conda-forge requests
 conda install -c conda-forge pytz
 conda install -c conda-forge six
 conda install -c conda-forge packaging
+```
 
-# Install pip packages
+4. Install required pip packages:
+```bash
+# Pip Packages
 pip install sounddevice
 pip install vosk==0.3.45
 pip install requests
 pip install idna
 pip install transformers
-pip install optimum 
+pip install optimum
 pip install auto-gptq
 pip install llama-cpp-python
 ```
 
-## Usage
-
-### Starting the System
-1. Activate the conda environment:
+5. Download required models:
 ```bash
-conda activate device_control
-```
+# Create models directory
+mkdir -p models
 
-2. Run the dependency test:
-```bash
-python test_dependencies.py
-```
+# Download Mistral 7B model
+wget https://huggingface.co/TheBloke/Mistral-7B-Instruct-v0.2-GGUF/resolve/main/mistral-7b-instruct-v0.2.Q4_K_M.gguf -O models/mistral-7b-instruct-v0.2.Q4_K_M.gguf
 
-3. Start the simulator:
-```bash
-python main.py --simulation
+# Download Vosk model
+wget https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip
+unzip vosk-model-small-en-us-0.15.zip -d models/
 ```
-
-### Available Commands
-The system currently supports the following command patterns:
-
-1. List available devices:
-```
-command list devices
-```
-
-2. Check device status:
-```
-command status WaterSystem
-```
-
-3. Control actuators:
-```
-command turn on MainPump in WaterSystem
-command turn off MainPump in WaterSystem
-```
-
-4. Read sensor values:
-```
-command read MainFlow from WaterSystem
-command read WaterTemp from WaterSystem
-```
-
-5. View command history:
-```
-command history
-```
-
-### Supported Devices
-Currently implemented device types:
-- Water System (pumps, valves, flow meters, temperature sensors)
-- HVAC System (circulators, temperature sensors)
 
 ## Project Structure
+
 ```
 voicePLC/
-├── device_components.py    # Base classes for Sensor, Actuator
-├── device.py              # Device class implementation
-├── device_controller.py   # Controller with regex command processing
-├── cli_simulator.py       # CLI interface for testing
-├── main.py               # Main program entry point
-├── test_dependencies.py  # Dependency verification
-└── voice_recognition.py  # Voice input processing
+├── models/
+│   ├── mistral-7b-instruct-v0.2.Q4_K_M.gguf
+│   └── vosk-model-small-en-us-0.15/
+├── device_components.py
+├── device.py
+├── device_controller.py
+├── llm_handler.py
+├── main.py
+├── voice_handler.py
+├── tts_handler.py
+├── devices.json
+└── README.md
 ```
 
-## Development Roadmap
-- [x] Basic device control framework
-- [x] Command-line interface
-- [x] Regex-based command processing
-- [ ] LLM integration for natural language processing
-- [ ] Voice command processing
-- [ ] Hardware integration
-- [ ] Web interface
+## Usage
 
-## Contributing
-Contributions are welcome! Please feel free to submit a Pull Request.
+1. Basic usage (CPU mode):
+```bash
+python main.py
+```
+
+2. With GPU acceleration:
+```bash
+python main.py --gpu
+```
+
+3. With specific GPU layers:
+```bash
+python main.py --gpu --gpu-layers 32
+```
+
+4. Testing components:
+```bash
+# Test speech recognition
+python test_stt.py
+
+# Test command processing
+python test_command.py
+
+# Test text-to-speech
+python test_tts.py
+```
+
+## Voice Commands
+
+Example commands:
+- "What is the temperature of sensor 1?"
+- "Turn actuator 1 on"
+- "Get the pressure from sensor 2"
+- "Check the status of pump 1"
+
+## Device Configuration
+
+Devices can be configured in the `devices.json` file with the following structure:
+```json
+{
+    "sensors": {
+        "sensor_id": {
+            "id": "sensor_id",
+            "type": "sensor_type",
+            "unit": "measurement_unit",
+            "range": [min, max],
+            "description": "sensor_description"
+        }
+    },
+    "actuators": {
+        "actuator_id": {
+            "id": "actuator_id",
+            "type": "actuator_type",
+            "states": ["state1", "state2"],
+            "description": "actuator_description"
+        }
+    }
+}
+```
 
 ## License
-This project is licensed under the MIT License - see the LICENSE file for details.
 
-## Acknowledgments
-- Built using Python and various open-source libraries
-- Tested on Ubuntu 22.04 WSL
+MIT License
+
+## Contributors
+
+- Stanley Oz
+
+## Version History
+
+- v1.0-regex: Initial version with regex command parsing
+- v1.1-llm: LLM integration for natural language processing
+- v1.2-voice: Voice command support with GPU acceleration

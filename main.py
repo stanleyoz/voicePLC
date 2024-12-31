@@ -1,90 +1,138 @@
 # main.py
-
 import argparse
+import sys
+from typing import Optional
 from rich.console import Console
+from rich.prompt import Prompt
 from device_controller import DeviceController
-from device import Device
-from device_components import FlowMeter, Pump, TemperatureSensor, Valve
-from cli_simulator import DeviceCommandSimulator
+from voice_handler import VoiceHandler
+from tts_handler import TTSHandler
+import signal
+import threading
 
 console = Console()
 
-def setup_mock_devices(controller: DeviceController) -> None:
-    """Set up mock devices for testing"""
-    console.print("[yellow]Setting up mock devices...[/yellow]")
-    
-    # Create a water system device
-    water_system = Device("WaterSystem", "Building A")
-    
-    # Add actuators
-    main_pump = Pump("MainPump", pin=18)
-    backup_pump = Pump("BackupPump", pin=19)
-    main_valve = Valve("MainValve", pin=20)
-    
-    water_system.add_actuator(main_pump)
-    water_system.add_actuator(backup_pump)
-    water_system.add_actuator(main_valve)
-    
-    # Add sensors
-    flow_meter = FlowMeter("MainFlow", pin=21)
-    temp_sensor = TemperatureSensor("WaterTemp", pin=22)
-    
-    water_system.add_sensor(flow_meter)
-    water_system.add_sensor(temp_sensor)
-    
-    # Add device metadata
-    water_system.set_metadata("description", "Primary water circulation system")
-    water_system.set_metadata("location", "Mechanical Room 101")
-    
-    # Add device to controller
-    controller.add_device(water_system)
-    
-    # Create a second device for testing
-    hvac_system = Device("HVACSystem", "Building A")
-    hvac_system.add_actuator(Pump("Circulator", pin=23))
-    hvac_system.add_sensor(TemperatureSensor("ReturnTemp", pin=24))
-    hvac_system.set_metadata("description", "HVAC circulation system")
-    
-    controller.add_device(hvac_system)
-    console.print("[green]Mock devices setup complete![/green]")
-
-def main():
-    parser = argparse.ArgumentParser(description="Device Control System")
-    parser.add_argument("--simulation", action="store_true", help="Run in simulation mode")
-    parser.add_argument("--model", default="models/mistral-7b-instruct-v0.2.Q4_K_M.gguf",
-                      help="Path to LLM model")
-    parser.add_argument("--response-mode", choices=['llm', 'json'], default='llm',
-                      help="Response mode: 'llm' for natural language, 'json' for raw data")
-    args = parser.parse_args()
-    
-    try:
-        # Initialize controller with model path and response mode
-        console.print("[yellow]Initializing controller...[/yellow]")
-        controller = DeviceController(
-            model_path=args.model,
-            llm_response=(args.response_mode == 'llm')
+class VoicePLC:
+    def __init__(self, 
+                 model_path: str,
+                 vosk_model_path: str,
+                 mock: bool = False,
+                 use_gpu: bool = False,
+                 gpu_layers: Optional[int] = None):
+        """Initialize VoicePLC system.
+        
+        Args:
+            model_path: Path to LLM model
+            vosk_model_path: Path to Vosk speech recognition model
+            mock: Use mock devices if True
+        """
+        self.controller = DeviceController(
+            model_path=model_path, 
+            mock=mock,
+            use_gpu=use_gpu,
+            gpu_layers=gpu_layers
+        )
+        self.tts = TTSHandler()
+        
+        # Initialize voice handler with callback to process_command
+        self.voice = VoiceHandler(
+            model_path=vosk_model_path,
+            callback=self.process_command
         )
         
-        # Set up mock devices
-        setup_mock_devices(controller)
+        self.running = False
         
-        if args.simulation:
-            # Run CLI simulator
-            console.print("\n[bold green]=== Device Control System Simulator ===[/bold green]")
-            console.print("[blue]Type 'help' or '?' to list commands.[/blue]")
-            simulator = DeviceCommandSimulator(controller)
-            simulator.cmdloop()
-        else:
-            # TODO: Implement voice control mode
-            console.print("[red]Voice control mode not yet implemented[/red]")
+    def process_command(self, command: str):
+        """Process voice commands through the controller.
+        
+        Args:
+            command: Voice command text
+        """
+        try:
+            response = self.controller.process_command(command)
+            if isinstance(response, str):
+                self.tts.speak(response)
+            elif isinstance(response, dict):
+                self.tts.speak(response.get('message', 'Command processed'))
+        except Exception as e:
+            error_msg = f"Error processing command: {e}"
+            console.print(f"[red]{error_msg}[/red]")
+            self.tts.speak(error_msg)
             
-    except KeyboardInterrupt:
-        console.print("\nShutting down...")
-    except Exception as e:
-        console.print(f"\n[red]Error: {str(e)}[/red]")
-        raise  # Re-raise the exception to see the full traceback
-    finally:
-        console.print("[green]Cleanup complete[/green]")
+    def start(self):
+        """Start the VoicePLC system."""
+        self.running = True
+        self.tts.start()
+        self.voice.start_listening()
+        
+        console.print("[green]VoicePLC system started[/green]")
+        self.tts.speak("Voice PLC system is ready for commands")
+        
+        # Wait for shutdown signal
+        try:
+            while self.running:
+                command = Prompt.ask("\nEnter command (or 'quit' to exit)")
+                if command.lower() == 'quit':
+                    break
+                self.process_command(command)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            self.stop()
+            
+    def stop(self):
+        """Stop the VoicePLC system."""
+        self.running = False
+        self.voice.stop_listening()
+        self.tts.stop()
+        console.print("[yellow]VoicePLC system stopped[/yellow]")
+
+def main():
+    parser = argparse.ArgumentParser(description='VoicePLC Control System')
+    parser.add_argument('--model', 
+                       default='models/mistral-7b-instruct-v0.2.Q4_K_M.gguf',
+                       help='Path to LLM model file')
+    parser.add_argument('--vosk-model',
+                       default='models/vosk-model-small-en-us-0.15',
+                       help='Path to Vosk model directory')
+    parser.add_argument('--mock',
+                       action='store_true',
+                       help='Use mock devices')
+    parser.add_argument('--gpu',
+                       action='store_true',
+                       help='Enable GPU acceleration')
+    parser.add_argument('--gpu-layers',
+                       type=int,
+                       help='Number of layers to offload to GPU (default: all)',
+                       default=None)
+    
+    args = parser.parse_args()
+    
+    # Handle Ctrl+C gracefully
+    def signal_handler(sig, frame):
+        console.print("\n[yellow]Shutting down...[/yellow]")
+        sys.exit(0)
+    
+    signal.signal(signal.SIGINT, signal_handler)
+    
+    # Start VoicePLC system
+    # Configure GPU settings
+    if args.gpu:
+        console.print("[yellow]Starting with GPU acceleration...[/yellow]")
+        if args.gpu_layers:
+            console.print(f"[yellow]Using {args.gpu_layers} GPU layers[/yellow]")
+    else:
+        console.print("[yellow]Running in CPU-only mode[/yellow]")
+
+    plc = VoicePLC(
+        model_path=args.model,
+        vosk_model_path=args.vosk_model,
+        mock=args.mock,
+        use_gpu=args.gpu,
+        gpu_layers=args.gpu_layers
+    )
+    
+    plc.start()
 
 if __name__ == "__main__":
     main()
